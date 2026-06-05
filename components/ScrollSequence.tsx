@@ -598,12 +598,12 @@ export default function ScrollSequence({
     if (video && Number.isFinite(video.duration) && video.duration > 0) {
       const current = renderedTimeRef.current;
       const target = targetTimeRef.current;
-      const next = current + (target - current) * 0.22;
+      const next = current + (target - current) * 0.12;
 
       renderedTimeRef.current =
         Math.abs(target - next) < 0.003 ? target : next;
 
-      if (Math.abs(video.currentTime - renderedTimeRef.current) > 0.015) {
+      if (Math.abs(video.currentTime - renderedTimeRef.current) > 0.01) {
         try {
           video.currentTime = renderedTimeRef.current;
         } catch {
@@ -1038,7 +1038,7 @@ export default function ScrollSequence({
           style={{
             backgroundImage: `url('${frameSources[0]}')`,
             backgroundSize: "cover",
-            opacity: !isMobileVideoMode && firstFrameReady ? 0 : 1
+            opacity: isMobileVideoMode || firstFrameReady ? 0 : 1
           }}
         />
         {isMobileVideoMode ? (
@@ -1050,7 +1050,7 @@ export default function ScrollSequence({
             preload="auto"
             poster={MOBILE_VIDEO_POSTER}
             onLoadedMetadata={handleMobileVideoLoadedMetadata}
-            className="absolute inset-0 z-[1] h-full w-full bg-[#050505] object-cover"
+            className="absolute left-1/2 top-1/2 z-[1] h-full w-full -translate-x-1/2 -translate-y-1/2 scale-[0.92] bg-[#050505] object-cover md:scale-100"
           >
             <source src={MOBILE_VIDEO_SRC} type="video/mp4" />
           </video>
