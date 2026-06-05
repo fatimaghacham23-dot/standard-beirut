@@ -44,7 +44,7 @@ const FRAME_SMOOTHING = 0.18;
 const MOBILE_CUP_SCALE = 1;
 const MOBILE_CUP_SHIFT_X = 0;
 const MOBILE_VIDEO_SRC = "/sequence/matcha-mobile-scrub.mp4";
-const MOBILE_VIDEO_POSTER = "/sequence/frame_001.webp";
+const MOBILE_VIDEO_POSTER = "/sequence/matcha-mobile-poster.jpg";
 const STABLE_VH_PROPERTY = "--stable-vh";
 
 const getDefaultFrameSrc = (index: number, folder = "sequence") =>
@@ -1050,7 +1050,7 @@ export default function ScrollSequence({
             preload="auto"
             poster={MOBILE_VIDEO_POSTER}
             onLoadedMetadata={handleMobileVideoLoadedMetadata}
-            className="absolute left-1/2 top-1/2 z-[1] h-full w-full -translate-x-1/2 -translate-y-1/2 scale-[0.92] bg-[#050505] object-cover md:scale-100"
+            className="absolute inset-0 h-full w-full object-cover"
           >
             <source src={MOBILE_VIDEO_SRC} type="video/mp4" />
           </video>
