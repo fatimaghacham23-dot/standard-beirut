@@ -2,6 +2,7 @@
 
 import {
   motion,
+  useMotionValueEvent,
   useReducedMotion,
   useScroll,
   useSpring,
@@ -38,12 +39,12 @@ const FRAME_COUNT = 60;
 const FRAME_PLAYBACK_END = 0.92;
 const PRIORITY_FRAME_COUNT = 8;
 const PHONE_BREAKPOINT = 640;
-const MOBILE_VIDEO_SCRUB_BREAKPOINT = 768;
+const MOBILE_VIDEO_BREAKPOINT = 768;
 const FRAME_SMOOTHING = 0.18;
-const VIDEO_SCRUB_SMOOTHING = 0.22;
 const MOBILE_CUP_SCALE = 1;
 const MOBILE_CUP_SHIFT_X = 0;
-const MOBILE_VIDEO_SRC = "/sequence/matcha-scroll.mp4";
+const MOBILE_VIDEO_SRC = "/sequence/matcha-mobile-scrub.mp4";
+const MOBILE_VIDEO_POSTER = "/sequence/frame_001.webp";
 const STABLE_VH_PROPERTY = "--stable-vh";
 
 const getDefaultFrameSrc = (index: number, folder = "sequence") =>
@@ -357,14 +358,14 @@ export default function ScrollSequence({
 }: ScrollSequenceProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mobileVideoRef = useRef<HTMLVideoElement | null>(null);
   const framesRef = useRef<Array<HTMLImageElement | undefined>>([]);
   const targetFrameRef = useRef(0);
   const renderedFrameRef = useRef(0);
-  const targetVideoTimeRef = useRef(0);
-  const renderedVideoTimeRef = useRef(0);
+  const targetTimeRef = useRef(0);
+  const renderedTimeRef = useRef(0);
   const rafRef = useRef<number | null>(null);
-  const videoRafRef = useRef<number | null>(null);
+  const scrubRafRef = useRef<number | null>(null);
   const lastDrawnFrameRef = useRef(-1);
   const lastDrawnNextFrameRef = useRef(-1);
   const lastDrawnAlphaRef = useRef(-1);
@@ -372,19 +373,16 @@ export default function ScrollSequence({
   const orientationResizeTimeoutRef = useRef<number | null>(null);
   const firstFrameReadyRef = useRef(false);
   const isSequenceInViewRef = useRef(false);
-  const useVideoScrubRef = useRef(false);
-  const videoReadyRef = useRef(false);
   const loadedFramesRef = useRef<Set<number>>(new Set());
   const preloadRemainingFramesRef = useRef<(() => void) | null>(null);
   const didPreloadRemainingFramesRef = useRef(false);
   const isSequenceNearViewRef = useRef(false);
   const [firstFrameReady, setFirstFrameReady] = useState(false);
-  const [frameFolder, setFrameFolder] = useState("sequence");
-  const [preferVideoScrub, setPreferVideoScrub] = useState<boolean | null>(
-    null
+  const [isMobileVideoMode, setIsMobileVideoMode] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.innerWidth < MOBILE_VIDEO_BREAKPOINT
   );
-  const [videoReady, setVideoReady] = useState(false);
-  const [videoFailed, setVideoFailed] = useState(false);
   const reducedMotion = useReducedMotion();
   const { ref: inViewportRef, isInView: isSequenceInView } =
     useInViewport<HTMLDivElement>();
@@ -393,8 +391,7 @@ export default function ScrollSequence({
       rootMargin: "800px",
       threshold: 0.01
     });
-  const useVideoScrub = preferVideoScrub === true && !videoFailed;
-  const showCanvas = firstFrameReady && (!useVideoScrub || !videoReady);
+  const showCanvas = !isMobileVideoMode && firstFrameReady;
 
   const { scrollYProgress } = useScroll({
     target: wrapperRef,
@@ -416,9 +413,9 @@ export default function ScrollSequence({
       Array.from({ length: frameCount }, (_, index) =>
         getFrameSrc
           ? getFrameSrc(index)
-          : getDefaultFrameSrc(index, frameFolder)
+          : getDefaultFrameSrc(index)
       ),
-    [frameCount, frameFolder, getFrameSrc]
+    [frameCount, getFrameSrc]
   );
 
   const setWrapperElement = useCallback(
@@ -522,7 +519,7 @@ export default function ScrollSequence({
       const clampedPosition = Math.min(frameCount - 1, Math.max(0, position));
       const shouldCrossfade =
         typeof window === "undefined" ||
-        window.innerWidth >= MOBILE_VIDEO_SCRUB_BREAKPOINT;
+        window.innerWidth >= MOBILE_VIDEO_BREAKPOINT;
 
       if (!shouldCrossfade) {
         const safeIndex = getNearestLoadedFrame(Math.round(clampedPosition));
@@ -588,12 +585,64 @@ export default function ScrollSequence({
     }
   }, []);
 
-  const cancelVideoScrub = useCallback(() => {
-    if (videoRafRef.current !== null) {
-      window.cancelAnimationFrame(videoRafRef.current);
-      videoRafRef.current = null;
+  const cancelMobileScrub = useCallback(() => {
+    if (scrubRafRef.current !== null) {
+      window.cancelAnimationFrame(scrubRafRef.current);
+      scrubRafRef.current = null;
     }
   }, []);
+
+  const scrubTick = useCallback(function scrubTick() {
+    const video = mobileVideoRef.current;
+
+    if (video && Number.isFinite(video.duration) && video.duration > 0) {
+      const current = renderedTimeRef.current;
+      const target = targetTimeRef.current;
+      const next = current + (target - current) * 0.22;
+
+      renderedTimeRef.current =
+        Math.abs(target - next) < 0.003 ? target : next;
+
+      if (Math.abs(video.currentTime - renderedTimeRef.current) > 0.015) {
+        try {
+          video.currentTime = renderedTimeRef.current;
+        } catch {
+          // Some mobile browsers can reject a seek while metadata is settling.
+        }
+      }
+    }
+
+    scrubRafRef.current = window.requestAnimationFrame(scrubTick);
+  }, []);
+
+  const scheduleMobileScrub = useCallback(() => {
+    if (
+      scrubRafRef.current !== null ||
+      !isMobileVideoMode ||
+      !isSequenceNearViewRef.current
+    ) {
+      return;
+    }
+
+    scrubRafRef.current = window.requestAnimationFrame(scrubTick);
+  }, [isMobileVideoMode, scrubTick]);
+
+  useMotionValueEvent(scrollYProgress, "change", (latest) => {
+    const video = mobileVideoRef.current;
+
+    if (
+      !isMobileVideoMode ||
+      !video ||
+      !Number.isFinite(video.duration) ||
+      video.duration <= 0
+    ) {
+      return;
+    }
+
+    targetTimeRef.current =
+      clamp(latest / FRAME_PLAYBACK_END) * video.duration;
+    scheduleMobileScrub();
+  });
 
   const animateFrames = useCallback(() => {
     rafRef.current = null;
@@ -601,7 +650,7 @@ export default function ScrollSequence({
     if (
       !firstFrameReadyRef.current ||
       !isSequenceInViewRef.current ||
-      useVideoScrubRef.current
+      isMobileVideoMode
     ) {
       return;
     }
@@ -618,88 +667,20 @@ export default function ScrollSequence({
     if (Math.abs(target - renderedFrameRef.current) >= 0.01) {
       rafRef.current = window.requestAnimationFrame(animateFrames);
     }
-  }, [drawInterpolatedFrame]);
+  }, [drawInterpolatedFrame, isMobileVideoMode]);
 
   const scheduleCanvasFrame = useCallback(() => {
     if (
       rafRef.current !== null ||
       !firstFrameReadyRef.current ||
       !isSequenceInViewRef.current ||
-      useVideoScrubRef.current
+      isMobileVideoMode
     ) {
       return;
     }
 
     rafRef.current = window.requestAnimationFrame(animateFrames);
-  }, [animateFrames]);
-
-  const animateVideoScrub = useCallback(() => {
-    videoRafRef.current = null;
-
-    const video = videoRef.current;
-
-    if (
-      !video ||
-      !videoReadyRef.current ||
-      !isSequenceInViewRef.current ||
-      !useVideoScrubRef.current ||
-      !Number.isFinite(video.duration) ||
-      video.duration <= 0
-    ) {
-      return;
-    }
-
-    const current = renderedVideoTimeRef.current;
-    const target = Math.min(
-      video.duration,
-      Math.max(0, targetVideoTimeRef.current)
-    );
-    const next = current + (target - current) * VIDEO_SCRUB_SMOOTHING;
-
-    renderedVideoTimeRef.current =
-      Math.abs(target - next) < 0.01 ? target : next;
-
-    if (Math.abs(video.currentTime - renderedVideoTimeRef.current) > 0.016) {
-      try {
-        video.currentTime = renderedVideoTimeRef.current;
-      } catch {
-        setVideoFailed(true);
-      }
-    }
-
-    if (Math.abs(target - renderedVideoTimeRef.current) >= 0.01) {
-      videoRafRef.current = window.requestAnimationFrame(animateVideoScrub);
-    }
-  }, []);
-
-  const scheduleVideoScrub = useCallback(() => {
-    if (
-      videoRafRef.current !== null ||
-      !videoReadyRef.current ||
-      !isSequenceInViewRef.current ||
-      !useVideoScrubRef.current
-    ) {
-      return;
-    }
-
-    videoRafRef.current = window.requestAnimationFrame(animateVideoScrub);
-  }, [animateVideoScrub]);
-
-  const updateVideoTargetTime = useCallback((latest: number) => {
-    const video = videoRef.current;
-
-    if (
-      !video ||
-      !Number.isFinite(video.duration) ||
-      video.duration <= 0
-    ) {
-      targetVideoTimeRef.current = 0;
-      return;
-    }
-
-    targetVideoTimeRef.current =
-      clamp(latest / FRAME_PLAYBACK_END) * video.duration;
-  }, []);
+  }, [animateFrames, isMobileVideoMode]);
 
   const resizeCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -710,7 +691,7 @@ export default function ScrollSequence({
 
     const rawDpr = window.devicePixelRatio || 1;
     const pixelRatio =
-      window.innerWidth < MOBILE_VIDEO_SCRUB_BREAKPOINT
+      window.innerWidth < MOBILE_VIDEO_BREAKPOINT
         ? 1
         : Math.min(rawDpr, 2);
     const width = window.innerWidth;
@@ -729,87 +710,75 @@ export default function ScrollSequence({
   }, [drawInterpolatedFrame]);
 
   useEffect(() => {
-    const updateVideoPreference = () => {
-      const isMobile = window.innerWidth < MOBILE_VIDEO_SCRUB_BREAKPOINT;
-
-      setPreferVideoScrub(isMobile);
-      setFrameFolder(isMobile && !getFrameSrc ? "sequence-mobile" : "sequence");
+    const updateMobileVideoMode = () => {
+      setIsMobileVideoMode(window.innerWidth < MOBILE_VIDEO_BREAKPOINT);
     };
 
-    updateVideoPreference();
-    window.addEventListener("resize", updateVideoPreference, {
+    updateMobileVideoMode();
+    window.addEventListener("resize", updateMobileVideoMode, {
       passive: true
     });
-    window.addEventListener("orientationchange", updateVideoPreference);
+    window.addEventListener("orientationchange", updateMobileVideoMode);
 
     return () => {
-      window.removeEventListener("resize", updateVideoPreference);
-      window.removeEventListener("orientationchange", updateVideoPreference);
+      window.removeEventListener("resize", updateMobileVideoMode);
+      window.removeEventListener("orientationchange", updateMobileVideoMode);
     };
-  }, [getFrameSrc]);
+  }, []);
 
   useEffect(() => {
     isSequenceInViewRef.current = isSequenceInView;
 
     if (!isSequenceInView) {
       cancelCanvasFrame();
-      cancelVideoScrub();
       return;
     }
 
     scheduleCanvasFrame();
-    scheduleVideoScrub();
   }, [
     cancelCanvasFrame,
-    cancelVideoScrub,
     isSequenceInView,
-    scheduleCanvasFrame,
-    scheduleVideoScrub
+    scheduleCanvasFrame
   ]);
 
   useEffect(() => {
     isSequenceNearViewRef.current = isSequenceNearView;
 
-    if (isSequenceNearView && !useVideoScrub) {
-      preloadRemainingFramesRef.current?.();
+    if (!isSequenceNearView || !isMobileVideoMode) {
+      cancelMobileScrub();
     }
-  }, [isSequenceNearView, useVideoScrub]);
 
-  useEffect(() => {
-    useVideoScrubRef.current = useVideoScrub;
-
-    if (useVideoScrub) {
-      cancelCanvasFrame();
-      scheduleVideoScrub();
+    if (isSequenceNearView && isMobileVideoMode) {
+      scheduleMobileScrub();
       return;
     }
 
-    cancelVideoScrub();
-    scheduleCanvasFrame();
+    if (isSequenceNearView) {
+      preloadRemainingFramesRef.current?.();
+    }
   }, [
-    cancelCanvasFrame,
-    cancelVideoScrub,
-    scheduleCanvasFrame,
-    scheduleVideoScrub,
-    useVideoScrub
+    cancelMobileScrub,
+    isMobileVideoMode,
+    isSequenceNearView,
+    scheduleMobileScrub
   ]);
 
   useEffect(() => {
-    videoReadyRef.current = videoReady;
-
-    if (videoReady) {
-      scheduleVideoScrub();
-    }
-  }, [scheduleVideoScrub, videoReady]);
-
-  useEffect(() => {
-    if (preferVideoScrub === null) {
+    if (isMobileVideoMode) {
+      cancelCanvasFrame();
+      preloadRemainingFramesRef.current = null;
+      framesRef.current = [];
+      loadedFramesRef.current = new Set();
+      firstFrameReadyRef.current = false;
+      setFirstFrameReady(false);
+      scheduleMobileScrub();
       return;
     }
 
+    cancelMobileScrub();
+
     let cancelled = false;
     let cancelDeferredPreload: (() => void) | null = null;
-    const shouldUseVideoScrub = preferVideoScrub && !videoFailed;
 
     framesRef.current = new Array(frameCount);
     loadedFramesRef.current = new Set();
@@ -929,10 +898,6 @@ export default function ScrollSequence({
         return;
       }
 
-      if (shouldUseVideoScrub) {
-        return;
-      }
-
       const priorityFrames = Array.from(
         { length: Math.min(PRIORITY_FRAME_COUNT, frameCount) },
         (_, index) => index
@@ -998,17 +963,17 @@ export default function ScrollSequence({
     drawInterpolatedFrame,
     frameCount,
     frameSources,
-    preferVideoScrub,
+    isMobileVideoMode,
     resizeCanvas,
-    videoFailed
+    cancelCanvasFrame,
+    cancelMobileScrub,
+    scheduleMobileScrub
   ]);
 
   useEffect(() => {
     const updateTargetFrame = (latest: number) => {
       targetFrameRef.current = getFramePosition(latest, frameCount);
-      updateVideoTargetTime(latest);
       scheduleCanvasFrame();
-      scheduleVideoScrub();
     };
 
     updateTargetFrame(scrollYProgress.get());
@@ -1016,9 +981,7 @@ export default function ScrollSequence({
   }, [
     frameCount,
     scheduleCanvasFrame,
-    scheduleVideoScrub,
-    scrollYProgress,
-    updateVideoTargetTime
+    scrollYProgress
   ]);
 
   useEffect(() => {
@@ -1030,36 +993,35 @@ export default function ScrollSequence({
     scheduleCanvasFrame();
   }, [firstFrameReady, scheduleCanvasFrame]);
 
-  const handleVideoLoadedMetadata = useCallback(() => {
-    const video = videoRef.current;
+  useEffect(
+    () => () => {
+      cancelCanvasFrame();
+      cancelMobileScrub();
+    },
+    [cancelCanvasFrame, cancelMobileScrub]
+  );
+
+  const handleMobileVideoLoadedMetadata = useCallback(() => {
+    const video = mobileVideoRef.current;
 
     if (!video || !Number.isFinite(video.duration) || video.duration <= 0) {
-      setVideoFailed(true);
       return;
     }
 
-    video.pause();
-    setVideoFailed(false);
-    setVideoReady(true);
-    videoReadyRef.current = true;
-    updateVideoTargetTime(scrollYProgress.get());
-    renderedVideoTimeRef.current = targetVideoTimeRef.current;
+    const nextTime =
+      clamp(scrollYProgress.get() / FRAME_PLAYBACK_END) * video.duration;
+
+    targetTimeRef.current = nextTime;
+    renderedTimeRef.current = nextTime;
 
     try {
-      video.currentTime = renderedVideoTimeRef.current;
+      video.currentTime = nextTime;
     } catch {
-      setVideoFailed(true);
-      return;
+      // Some mobile browsers can reject a seek while metadata is settling.
     }
 
-    scheduleVideoScrub();
-  }, [scheduleVideoScrub, scrollYProgress, updateVideoTargetTime]);
-
-  const handleVideoError = useCallback(() => {
-    setVideoReady(false);
-    setVideoFailed(true);
-    videoReadyRef.current = false;
-  }, []);
+    scheduleMobileScrub();
+  }, [scheduleMobileScrub, scrollYProgress]);
 
   return (
     <section
@@ -1076,37 +1038,32 @@ export default function ScrollSequence({
           style={{
             backgroundImage: `url('${frameSources[0]}')`,
             backgroundSize: "cover",
-            opacity: firstFrameReady ? 0 : 1
+            opacity: !isMobileVideoMode && firstFrameReady ? 0 : 1
           }}
         />
-        {useVideoScrub ? (
+        {isMobileVideoMode ? (
           <video
-            ref={videoRef}
+            ref={mobileVideoRef}
             aria-hidden="true"
             muted
             playsInline
             preload="auto"
-            poster={frameSources[0]}
-            onError={handleVideoError}
-            onLoadedMetadata={handleVideoLoadedMetadata}
-            className={`absolute inset-0 z-[1] h-[var(--stable-vh)] w-screen bg-[#050505] object-cover transition-opacity duration-700 ${
-              videoReady && !videoFailed ? "opacity-100" : "opacity-0"
-            }`}
-            style={{
-              transform: `translateX(${MOBILE_CUP_SHIFT_X}px) scale(${MOBILE_CUP_SCALE})`,
-              transformOrigin: "center center"
-            }}
+            poster={MOBILE_VIDEO_POSTER}
+            onLoadedMetadata={handleMobileVideoLoadedMetadata}
+            className="absolute inset-0 z-[1] h-full w-full bg-[#050505] object-cover"
           >
             <source src={MOBILE_VIDEO_SRC} type="video/mp4" />
           </video>
         ) : null}
-        <canvas
-          ref={canvasRef}
-          aria-hidden="true"
-          className={`absolute inset-0 z-[1] h-[var(--stable-vh)] w-screen bg-[#050505] transition-opacity duration-700 ${
-            showCanvas ? "opacity-100" : "opacity-0"
-          }`}
-        />
+        {!isMobileVideoMode ? (
+          <canvas
+            ref={canvasRef}
+            aria-hidden="true"
+            className={`absolute inset-0 z-[1] h-[var(--stable-vh)] w-screen bg-[#050505] transition-opacity duration-700 ${
+              showCanvas ? "opacity-100" : "opacity-0"
+            }`}
+          />
+        ) : null}
 
         {sceneTwoBeat ? (
           <SceneTwoVisualLayers
