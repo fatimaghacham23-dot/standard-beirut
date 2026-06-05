@@ -2,9 +2,14 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export function useInViewport<T extends HTMLElement>() {
+export function useInViewport<T extends HTMLElement>(
+  options?: IntersectionObserverInit
+) {
   const ref = useRef<T | null>(null);
   const [isInView, setIsInView] = useState(false);
+  const root = options?.root ?? null;
+  const rootMargin = options?.rootMargin ?? "150px";
+  const threshold = options?.threshold ?? 0.01;
 
   useEffect(() => {
     const node = ref.current;
@@ -18,13 +23,13 @@ export function useInViewport<T extends HTMLElement>() {
       ([entry]) => {
         setIsInView(entry.isIntersecting);
       },
-      { rootMargin: "200px", threshold: 0.01 }
+      { root, rootMargin, threshold }
     );
 
     observer.observe(node);
 
     return () => observer.disconnect();
-  }, []);
+  }, [root, rootMargin, threshold]);
 
   return { ref, isInView };
 }

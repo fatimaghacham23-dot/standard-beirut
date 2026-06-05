@@ -46,8 +46,8 @@ const MOBILE_CUP_SHIFT_X = 0;
 const MOBILE_VIDEO_SRC = "/sequence/matcha-scroll.mp4";
 const STABLE_VH_PROPERTY = "--stable-vh";
 
-const defaultGetFrameSrc = (index: number) =>
-  `/sequence/frame_${String(index + 1).padStart(3, "0")}.webp`;
+const getDefaultFrameSrc = (index: number, folder = "sequence") =>
+  `/${folder}/frame_${String(index + 1).padStart(3, "0")}.webp`;
 
 function preloadFrame(src: string, priority = false): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -352,7 +352,7 @@ export default function ScrollSequence({
   ariaLabel = "Scroll-linked product animation",
   beats,
   frameCount = FRAME_COUNT,
-  getFrameSrc = defaultGetFrameSrc,
+  getFrameSrc,
   id
 }: ScrollSequenceProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
@@ -375,7 +375,11 @@ export default function ScrollSequence({
   const useVideoScrubRef = useRef(false);
   const videoReadyRef = useRef(false);
   const loadedFramesRef = useRef<Set<number>>(new Set());
+  const preloadRemainingFramesRef = useRef<(() => void) | null>(null);
+  const didPreloadRemainingFramesRef = useRef(false);
+  const isSequenceNearViewRef = useRef(false);
   const [firstFrameReady, setFirstFrameReady] = useState(false);
+  const [frameFolder, setFrameFolder] = useState("sequence");
   const [preferVideoScrub, setPreferVideoScrub] = useState<boolean | null>(
     null
   );
@@ -384,6 +388,11 @@ export default function ScrollSequence({
   const reducedMotion = useReducedMotion();
   const { ref: inViewportRef, isInView: isSequenceInView } =
     useInViewport<HTMLDivElement>();
+  const { ref: nearViewportRef, isInView: isSequenceNearView } =
+    useInViewport<HTMLDivElement>({
+      rootMargin: "800px",
+      threshold: 0.01
+    });
   const useVideoScrub = preferVideoScrub === true && !videoFailed;
   const showCanvas = firstFrameReady && (!useVideoScrub || !videoReady);
 
@@ -403,16 +412,22 @@ export default function ScrollSequence({
   const sceneTwoBeat = beats[1];
 
   const frameSources = useMemo(
-    () => Array.from({ length: frameCount }, (_, index) => getFrameSrc(index)),
-    [frameCount, getFrameSrc]
+    () =>
+      Array.from({ length: frameCount }, (_, index) =>
+        getFrameSrc
+          ? getFrameSrc(index)
+          : getDefaultFrameSrc(index, frameFolder)
+      ),
+    [frameCount, frameFolder, getFrameSrc]
   );
 
   const setWrapperElement = useCallback(
     (node: HTMLDivElement | null) => {
       wrapperRef.current = node;
       inViewportRef.current = node;
+      nearViewportRef.current = node;
     },
-    [inViewportRef]
+    [inViewportRef, nearViewportRef]
   );
 
   const getNearestLoadedFrame = useCallback(
@@ -505,6 +520,33 @@ export default function ScrollSequence({
       }
 
       const clampedPosition = Math.min(frameCount - 1, Math.max(0, position));
+      const shouldCrossfade =
+        typeof window === "undefined" ||
+        window.innerWidth >= MOBILE_VIDEO_SCRUB_BREAKPOINT;
+
+      if (!shouldCrossfade) {
+        const safeIndex = getNearestLoadedFrame(Math.round(clampedPosition));
+        const frame = framesRef.current[safeIndex];
+
+        if (!isFrameDrawable(frame)) {
+          return;
+        }
+
+        if (
+          !force &&
+          safeIndex === lastDrawnFrameRef.current &&
+          lastDrawnNextFrameRef.current === -1
+        ) {
+          return;
+        }
+
+        lastDrawnFrameRef.current = safeIndex;
+        lastDrawnNextFrameRef.current = -1;
+        lastDrawnAlphaRef.current = 0;
+        drawFrame(canvas, frame);
+        return;
+      }
+
       const baseIndex = Math.floor(clampedPosition);
       const nextIndex = Math.min(baseIndex + 1, frameCount - 1);
       const alpha = clampedPosition - baseIndex;
@@ -666,11 +708,11 @@ export default function ScrollSequence({
       return;
     }
 
-    const rawPixelRatio = window.devicePixelRatio || 1;
+    const rawDpr = window.devicePixelRatio || 1;
     const pixelRatio =
-      window.innerWidth < PHONE_BREAKPOINT
-        ? Math.min(rawPixelRatio, 1.25)
-        : Math.min(rawPixelRatio, 1.5);
+      window.innerWidth < MOBILE_VIDEO_SCRUB_BREAKPOINT
+        ? 1
+        : Math.min(rawDpr, 2);
     const width = window.innerWidth;
     const height = getStableViewportHeight();
     const nextWidth = Math.round(width * pixelRatio);
@@ -688,7 +730,10 @@ export default function ScrollSequence({
 
   useEffect(() => {
     const updateVideoPreference = () => {
-      setPreferVideoScrub(window.innerWidth < MOBILE_VIDEO_SCRUB_BREAKPOINT);
+      const isMobile = window.innerWidth < MOBILE_VIDEO_SCRUB_BREAKPOINT;
+
+      setPreferVideoScrub(isMobile);
+      setFrameFolder(isMobile && !getFrameSrc ? "sequence-mobile" : "sequence");
     };
 
     updateVideoPreference();
@@ -701,7 +746,7 @@ export default function ScrollSequence({
       window.removeEventListener("resize", updateVideoPreference);
       window.removeEventListener("orientationchange", updateVideoPreference);
     };
-  }, []);
+  }, [getFrameSrc]);
 
   useEffect(() => {
     isSequenceInViewRef.current = isSequenceInView;
@@ -721,6 +766,14 @@ export default function ScrollSequence({
     scheduleCanvasFrame,
     scheduleVideoScrub
   ]);
+
+  useEffect(() => {
+    isSequenceNearViewRef.current = isSequenceNearView;
+
+    if (isSequenceNearView && !useVideoScrub) {
+      preloadRemainingFramesRef.current?.();
+    }
+  }, [isSequenceNearView, useVideoScrub]);
 
   useEffect(() => {
     useVideoScrubRef.current = useVideoScrub;
@@ -760,6 +813,7 @@ export default function ScrollSequence({
 
     framesRef.current = new Array(frameCount);
     loadedFramesRef.current = new Set();
+    didPreloadRemainingFramesRef.current = false;
     firstFrameReadyRef.current = false;
     targetFrameRef.current = 0;
     renderedFrameRef.current = 0;
@@ -816,12 +870,19 @@ export default function ScrollSequence({
     };
 
     const preloadRemainingFrames = () => {
+      if (didPreloadRemainingFramesRef.current) {
+        return;
+      }
+
+      didPreloadRemainingFramesRef.current = true;
       Array.from({ length: frameCount }, (_, index) => index)
         .filter((index) => index >= PRIORITY_FRAME_COUNT)
         .forEach((index) => {
           void loadFrameAtIndex(index);
         });
     };
+
+    preloadRemainingFramesRef.current = preloadRemainingFrames;
 
     const deferRemainingPreload = () => {
       const idleWindow = window as unknown as {
@@ -884,7 +945,10 @@ export default function ScrollSequence({
       }
 
       drawInterpolatedFrame(renderedFrameRef.current, true);
-      deferRemainingPreload();
+
+      if (isSequenceNearViewRef.current) {
+        deferRemainingPreload();
+      }
     };
 
     void loadFrames();
@@ -921,6 +985,7 @@ export default function ScrollSequence({
 
     return () => {
       cancelled = true;
+      preloadRemainingFramesRef.current = null;
       cancelDeferredPreload?.();
       window.removeEventListener("resize", handleResize);
       window.removeEventListener("orientationchange", handleOrientationChange);

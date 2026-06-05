@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import ScrollSequence, { type StoryBeat } from "@/components/ScrollSequence";
+import type { StoryBeat } from "@/components/ScrollSequence";
 import { FactArcSignature } from "@/components/FactArcSignature";
 import { FluidNav } from "@/components/FluidNav";
 import { HeroTypewriterLine } from "@/components/HeroTypewriterLine";
+import { LazyPaymentMethodsVideo } from "@/components/LazyPaymentMethodsVideo";
+import { LazyScrollSequence } from "@/components/LazyScrollSequence";
 import { LiquidGlassPanel } from "@/components/LiquidGlassPanel";
-import { PaymentMethodsVideo } from "@/components/PaymentMethodsVideo";
 import { SiteButton } from "@/components/SiteButton";
 import { GradientBackground } from "@/components/paper-design-shader-background";
 import { GooeyText } from "@/components/ui/gooey-text-morphing";
@@ -224,7 +225,7 @@ export default function Page() {
         </div>
       </section>
 
-      <ScrollSequence
+      <LazyScrollSequence
         id="experience"
         ariaLabel={"Scroll-linked " + site.brandName + " brand experience"}
         beats={storyBeats}
@@ -319,7 +320,7 @@ export default function Page() {
         </div>
       </section>
 
-      <PaymentMethodsVideo
+      <LazyPaymentMethodsVideo
         ariaLabel={site.videoAriaLabel}
         label={site.videoLabel}
       />

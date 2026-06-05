@@ -2,6 +2,7 @@
 
 import * as React from "react";
 
+import { isMobilePerformanceDevice } from "@/lib/performance";
 import { cn } from "@/lib/utils";
 
 export function LiquidGlassPanel({
@@ -13,6 +14,11 @@ export function LiquidGlassPanel({
 }) {
   const id = React.useId();
   const filterId = `liquid-glass-panel-${id.replace(/:/g, "")}`;
+  const [useExpensiveFilter, setUseExpensiveFilter] = React.useState(false);
+
+  React.useEffect(() => {
+    setUseExpensiveFilter(!isMobilePerformanceDevice());
+  }, []);
 
   return (
     <div
@@ -33,7 +39,11 @@ export function LiquidGlassPanel({
 
       <div
         className="absolute inset-0 isolate -z-10 h-full w-full overflow-hidden rounded-full bg-white/[0.035] backdrop-blur-md"
-        style={{ backdropFilter: `url("#${filterId}") blur(14px)` }}
+        style={{
+          backdropFilter: useExpensiveFilter
+            ? `url("#${filterId}") blur(14px)`
+            : "blur(14px)"
+        }}
       />
 
       <div className="pointer-events-none absolute inset-0 rounded-full border border-white/15" />
@@ -42,6 +52,7 @@ export function LiquidGlassPanel({
 
       <div className="relative z-10">{children}</div>
 
+      {useExpensiveFilter ? (
       <svg className="hidden">
         <defs>
           <filter
@@ -81,6 +92,7 @@ export function LiquidGlassPanel({
           </filter>
         </defs>
       </svg>
+      ) : null}
     </div>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useInViewport } from "@/lib/use-in-viewport";
 import { cn } from "@/lib/utils";
 
 interface GooeyTextProps {
@@ -25,9 +26,26 @@ export function GooeyText({
   );
   const text1Ref = React.useRef<HTMLSpanElement>(null);
   const text2Ref = React.useRef<HTMLSpanElement>(null);
+  const { ref, isInView } = useInViewport<HTMLDivElement>();
 
   React.useEffect(() => {
     if (texts.length === 0) {
+      return;
+    }
+
+    if (text1Ref.current && text2Ref.current) {
+      text1Ref.current.textContent = texts[texts.length - 1];
+      text2Ref.current.textContent = texts[0];
+    }
+
+    if (!isInView) {
+      if (text1Ref.current && text2Ref.current) {
+        text1Ref.current.style.filter = "";
+        text1Ref.current.style.opacity = "0%";
+        text2Ref.current.style.filter = "";
+        text2Ref.current.style.opacity = "100%";
+      }
+
       return;
     }
 
@@ -111,10 +129,10 @@ export function GooeyText({
       isMounted = false;
       window.cancelAnimationFrame(animationFrameId);
     };
-  }, [texts, morphTime, cooldownTime]);
+  }, [texts, morphTime, cooldownTime, isInView]);
 
   return (
-    <div className={cn("relative", className)}>
+    <div ref={ref} className={cn("relative", className)}>
       <svg className="absolute h-0 w-0" aria-hidden="true" focusable="false">
         <defs>
           <filter id={filterId}>

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { GrainGradient } from "@paper-design/shaders-react";
+import { isMobilePerformanceDevice } from "@/lib/performance";
 import { useInViewport } from "@/lib/use-in-viewport";
 
 export function GradientBackground() {
@@ -13,7 +14,7 @@ export function GradientBackground() {
       "(prefers-reduced-motion: reduce)"
     ).matches;
 
-    setUseShader(!reduceMotion);
+    setUseShader(!reduceMotion && !isMobilePerformanceDevice());
   }, []);
 
   if (!useShader) {

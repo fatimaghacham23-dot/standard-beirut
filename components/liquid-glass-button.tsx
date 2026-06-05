@@ -4,6 +4,7 @@ import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 
+import { isMobilePerformanceDevice } from "@/lib/performance"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
@@ -104,6 +105,12 @@ function LiquidButton({
     "relative",
     liquidbuttonVariants({ variant, size, className })
   )
+  const [useExpensiveFilter, setUseExpensiveFilter] = React.useState(false)
+
+  React.useEffect(() => {
+    setUseExpensiveFilter(!isMobilePerformanceDevice())
+  }, [])
+
   const content = (
     <>
       <div className="absolute top-0 left-0 z-0 h-full w-full rounded-full 
@@ -112,13 +119,17 @@ function LiquidButton({
       dark:shadow-[0_0_8px_rgba(0,0,0,0.03),0_2px_6px_rgba(0,0,0,0.08),inset_3px_3px_0.5px_-3.5px_rgba(255,255,255,0.09),inset_-3px_-3px_0.5px_-3.5px_rgba(255,255,255,0.85),inset_1px_1px_1px_-0.5px_rgba(255,255,255,0.6),inset_-1px_-1px_1px_-0.5px_rgba(255,255,255,0.6),inset_0_0_6px_6px_rgba(255,255,255,0.12),inset_0_0_2px_2px_rgba(255,255,255,0.06),0_0_12px_rgba(0,0,0,0.15)]" />
       <div
         className="absolute top-0 left-0 isolate -z-10 h-full w-full overflow-hidden rounded-md"
-        style={{ backdropFilter: 'url("#container-glass")' }}
+        style={{
+          backdropFilter: useExpensiveFilter
+            ? 'url("#container-glass")'
+            : "blur(14px)"
+        }}
       />
 
       <div className="pointer-events-none z-10 ">
         {children}
       </div>
-      <GlassFilter />
+      {useExpensiveFilter ? <GlassFilter /> : null}
     </>
   )
 
