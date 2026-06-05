@@ -12,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SiteButton } from "@/components/SiteButton";
 import { useInViewport } from "@/lib/use-in-viewport";
+import MobileWebCodecsScrub from "@/components/MobileWebCodecsScrub";
 
 export type StoryBeat = {
   eyebrow?: string;
@@ -46,6 +47,15 @@ const MOBILE_CUP_SHIFT_X = 0;
 const MOBILE_VIDEO_SRC = "/sequence/matcha-mobile-scrub.mp4";
 const MOBILE_VIDEO_POSTER = "/sequence/matcha-mobile-poster.jpg";
 const STABLE_VH_PROPERTY = "--stable-vh";
+
+/* WebCodecs experimental mobile renderer – set to false to disable. */
+const ENABLE_WEB_CODECS_MOBILE = true;
+
+const supportsWebCodecs =
+  typeof window !== "undefined" &&
+  "VideoDecoder" in window &&
+  "EncodedVideoChunk" in window &&
+  "VideoFrame" in window;
 
 const getDefaultFrameSrc = (index: number, folder = "sequence") =>
   `/${folder}/frame_${String(index + 1).padStart(3, "0")}.webp`;
@@ -383,6 +393,10 @@ export default function ScrollSequence({
       typeof window !== "undefined" &&
       window.innerWidth < MOBILE_VIDEO_BREAKPOINT
   );
+  const [webCodecsActive, setWebCodecsActive] = useState(false);
+  const [webCodecsFailed, setWebCodecsFailed] = useState(false);
+  const webCodecsActiveRef = useRef(false);
+  webCodecsActiveRef.current = webCodecsActive;
   const reducedMotion = useReducedMotion();
   const { ref: inViewportRef, isInView: isSequenceInView } =
     useInViewport<HTMLDivElement>();
@@ -593,6 +607,12 @@ export default function ScrollSequence({
   }, []);
 
   const scrubTick = useCallback(function scrubTick() {
+    /* Stop the mobile-video RAF loop when WebCodecs is the active renderer. */
+    if (webCodecsActiveRef.current) {
+      scrubRafRef.current = null;
+      return;
+    }
+
     const video = mobileVideoRef.current;
 
     if (video && Number.isFinite(video.duration) && video.duration > 0) {
@@ -725,6 +745,12 @@ export default function ScrollSequence({
       window.removeEventListener("orientationchange", updateMobileVideoMode);
     };
   }, []);
+
+  /* Reset WebCodecs state when switching between mobile / desktop. */
+  useEffect(() => {
+    setWebCodecsActive(false);
+    setWebCodecsFailed(false);
+  }, [isMobileVideoMode]);
 
   useEffect(() => {
     isSequenceInViewRef.current = isSequenceInView;
@@ -1042,18 +1068,36 @@ export default function ScrollSequence({
           }}
         />
         {isMobileVideoMode ? (
-          <video
-            ref={mobileVideoRef}
-            aria-hidden="true"
-            muted
-            playsInline
-            preload="auto"
-            poster={MOBILE_VIDEO_POSTER}
-            onLoadedMetadata={handleMobileVideoLoadedMetadata}
-            className="absolute inset-0 h-full w-full object-cover"
-          >
-            <source src={MOBILE_VIDEO_SRC} type="video/mp4" />
-          </video>
+          <>
+            {ENABLE_WEB_CODECS_MOBILE &&
+            supportsWebCodecs &&
+            !webCodecsFailed ? (
+              <MobileWebCodecsScrub
+                videoSrc={MOBILE_VIDEO_SRC}
+                scrollProgress={scrollYProgress}
+                playbackEnd={FRAME_PLAYBACK_END}
+                onFallback={() => {
+                  setWebCodecsFailed(true);
+                  setWebCodecsActive(false);
+                }}
+                onReady={() => setWebCodecsActive(true)}
+              />
+            ) : null}
+            {!webCodecsActive || webCodecsFailed ? (
+              <video
+                ref={mobileVideoRef}
+                aria-hidden="true"
+                muted
+                playsInline
+                preload="auto"
+                poster={MOBILE_VIDEO_POSTER}
+                onLoadedMetadata={handleMobileVideoLoadedMetadata}
+                className="absolute inset-0 h-full w-full object-cover"
+              >
+                <source src={MOBILE_VIDEO_SRC} type="video/mp4" />
+              </video>
+            ) : null}
+          </>
         ) : null}
         {!isMobileVideoMode ? (
           <canvas
